@@ -7,7 +7,7 @@ import numpy as np
 from typing import Dict, List, Optional, Union, Tuple
 import logging
 from arch import arch_model
-from arch.univariate import GARCH, EGARCH, GJR_GARCH
+from arch.univariate import GARCH, EGARCH
 import warnings
 warnings.filterwarnings('ignore')
 
