@@ -27,7 +27,7 @@ def analyze_sample_policy_events():
         return
     
     # Initialize DeepSeek LLM adapter
-    api_key = "sk-8990403e972a4624bb313314927bc4c2"
+    api_key = ""
     llm_adapter = LLMAdapter(api_key=api_key, model="deepseek-chat")
     
     print(f"\n🧠 Analyzing sentiment with DeepSeek...")
