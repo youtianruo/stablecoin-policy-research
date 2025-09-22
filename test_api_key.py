@@ -10,7 +10,7 @@ import json
 def test_deepseek_api():
     """Test DeepSeek API with the provided key."""
     
-    api_key = "sk-8990403e972a4624bb313314927bc4c2"
+    api_key = ""
     
     print("🧪 Testing DeepSeek API Key")
     print("=" * 40)
