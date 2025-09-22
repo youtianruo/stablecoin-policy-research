@@ -32,12 +32,12 @@ class SentimentAnalyzer:
         
         # Get API keys
         api_keys = config.get('api_keys', {})
-        openai_key = api_keys.get('openai')
+        deepseek_key = api_keys.get('deepseek')
         
-        if openai_key:
+        if deepseek_key:
             self.llm_adapter = LLMAdapter(
-                api_key=openai_key,
-                model=config.get('sentiment', {}).get('model', 'gpt-3.5-turbo')
+                api_key=deepseek_key,
+                model=config.get('sentiment', {}).get('model', 'deepseek-chat')
             )
         
         # Initialize FinBERT (no API key needed)

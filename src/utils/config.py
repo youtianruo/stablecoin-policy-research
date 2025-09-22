@@ -48,6 +48,10 @@ def _override_with_env_vars(config: Dict[str, Any]) -> Dict[str, Any]:
         Updated configuration dictionary
     """
     # API keys
+    if 'DEEPSEEK_API_KEY' in os.environ:
+        config.setdefault('api_keys', {})['deepseek'] = os.environ['DEEPSEEK_API_KEY']
+    
+    # Legacy OpenAI support (optional)
     if 'OPENAI_API_KEY' in os.environ:
         config.setdefault('api_keys', {})['openai'] = os.environ['OPENAI_API_KEY']
     

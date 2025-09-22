@@ -63,8 +63,8 @@ policy_events:
 
 # Sentiment analysis
 sentiment:
-  # LLM model for sentiment analysis
-  model: "gpt-3.5-turbo"
+  # LLM model for sentiment analysis (DeepSeek is cheaper and more stable)
+  model: "deepseek-chat"
   
   # Sentiment categories
   categories:

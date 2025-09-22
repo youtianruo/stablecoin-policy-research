@@ -9,7 +9,7 @@ This project analyzes how stablecoin markets respond to Federal Reserve policy a
 ## Features
 
 - **Data Collection**: Automated data fetching from CoinGecko, Federal Reserve, and macro data sources
-- **Sentiment Analysis**: LLM-based sentiment analysis of FOMC minutes and speeches
+- **Sentiment Analysis**: DeepSeek LLM-based sentiment analysis of FOMC minutes and speeches (cheaper and more stable than OpenAI)
 - **Event Studies**: Cumulative abnormal returns and buy-and-hold abnormal returns analysis
 - **Volatility Modeling**: GARCH/EGARCH models for volatility dynamics
 - **Policy Transmission**: VAR models with impulse response functions

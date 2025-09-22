@@ -1,8 +1,8 @@
 """
-LLM adapter for sentiment analysis of policy text.
+LLM adapter for sentiment analysis of policy text using DeepSeek API.
 """
 
-import openai
+import requests
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Union
@@ -15,20 +15,24 @@ logger = logging.getLogger(__name__)
 
 class LLMAdapter:
     """
-    Unified interface for LLM-based sentiment analysis.
+    Unified interface for LLM-based sentiment analysis using DeepSeek API.
     """
     
-    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
+    def __init__(self, api_key: str, model: str = "deepseek-chat"):
         """
         Initialize LLM adapter.
         
         Args:
-            api_key: OpenAI API key
-            model: Model to use for analysis
+            api_key: DeepSeek API key
+            model: Model to use for analysis (default: deepseek-chat)
         """
         self.api_key = api_key
         self.model = model
-        openai.api_key = api_key
+        self.base_url = "https://api.deepseek.com/v1/chat/completions"
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
         
         # Sentiment categories
         self.sentiment_categories = [
@@ -43,7 +47,7 @@ class LLMAdapter:
         context: str = "Federal Reserve monetary policy"
     ) -> Dict[str, Union[float, str]]:
         """
-        Analyze sentiment of policy text.
+        Analyze sentiment of policy text using DeepSeek API.
         
         Args:
             text: Text to analyze
@@ -55,17 +59,26 @@ class LLMAdapter:
         try:
             prompt = self._create_sentiment_prompt(text, context)
             
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=[
+            payload = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": "You are an expert financial analyst specializing in Federal Reserve policy analysis."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistent results
-                max_tokens=500
-            )
+                "temperature": 0.1,  # Low temperature for consistent results
+                "max_tokens": 500
+            }
             
-            result_text = response.choices[0].message.content
+            response = requests.post(
+                self.base_url,
+                headers=self.headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            result_data = response.json()
+            result_text = result_data['choices'][0]['message']['content']
             sentiment_result = self._parse_sentiment_response(result_text)
             
             return sentiment_result
