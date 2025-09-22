@@ -1,0 +1,125 @@
+# Central configuration file for stablecoin policy research
+
+# Data sources and paths
+data:
+  raw_dir: "./data/raw"
+  interim_dir: "./data/interim"
+  processed_dir: "./data/processed"
+  cache_dir: "./data/cache"
+
+# Stablecoin tickers to analyze
+stablecoins:
+  tickers:
+    - "USDT"  # Tether
+    - "USDC"  # USD Coin
+    - "DAI"   # Dai
+    - "BUSD"  # Binance USD
+    - "FRAX"  # Frax
+    - "LUSD"  # Liquity USD
+    - "TUSD"  # TrueUSD
+    - "USDP"  # Pax Dollar
+  
+  # CoinGecko IDs for stablecoins
+  coingecko_ids:
+    USDT: "tether"
+    USDC: "usd-coin"
+    DAI: "dai"
+    BUSD: "binance-usd"
+    FRAX: "frax"
+    LUSD: "liquity-usd"
+    TUSD: "true-usd"
+    USDP: "paxos-standard"
+
+# Macroeconomic indicators
+macro_indicators:
+  # FRED series IDs
+  fed_funds_rate: "FEDFUNDS"
+  treasury_10y: "DGS10"
+  treasury_2y: "DGS2"
+  breakeven_10y: "T10YIE"
+  vix: "VIXCLS"
+  dxy: "DTWEXBGS"
+  unemployment: "UNRATE"
+  cpi: "CPIAUCSL"
+  gdp: "GDP"
+
+# Policy events
+policy_events:
+  # Event types to analyze
+  event_types:
+    - "fomc_meeting"
+    - "fomc_minutes"
+    - "fed_speech"
+    - "rate_decision"
+    - "qt_announcement"
+  
+  # Event windows (trading days)
+  event_window:
+    pre: 5
+    post: 5
+  
+  # Estimation window for normal returns (trading days)
+  estimation_window: 250
+
+# Sentiment analysis
+sentiment:
+  # LLM model for sentiment analysis
+  model: "gpt-3.5-turbo"
+  
+  # Sentiment categories
+  categories:
+    - "hawkish"
+    - "dovish"
+    - "neutral"
+  
+  # Text preprocessing
+  preprocessing:
+    remove_stopwords: true
+    min_length: 10
+    max_length: 4000
+
+# Market metrics
+market_metrics:
+  # Return calculation
+  returns:
+    frequency: "daily"
+    method: "log"
+  
+  # Volatility calculation
+  volatility:
+    window: 30
+    method: "garch"
+  
+  # Peg deviation threshold
+  peg_deviation:
+    threshold: 0.01  # 1% deviation from $1.00
+
+# Analysis parameters
+analysis:
+  # Event study
+  event_study:
+    confidence_level: 0.95
+    bootstrap_samples: 1000
+  
+  # GARCH models
+  garch:
+    models: ["GARCH", "EGARCH", "GJR-GARCH"]
+    distribution: "normal"
+  
+  # VAR models
+  var:
+    lags: 4
+    variables: ["fed_funds", "stablecoin_supply", "peg_deviation"]
+
+# Output settings
+output:
+  figures_dir: "./figures"
+  results_dir: "./results"
+  format: "png"
+  dpi: 300
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/research.log"
