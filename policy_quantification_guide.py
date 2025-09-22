@@ -75,7 +75,7 @@ def demonstrate_api_call():
     print(f"'{policy_text.strip()}'")
     
     # Initialize LLM adapter
-    api_key = "sk-8990403e972a4624bb313314927bc4c2"
+    api_key = ""
     llm_adapter = LLMAdapter(api_key=api_key, model="deepseek-chat")
     
     print("\n🔄 Making API Call...")
