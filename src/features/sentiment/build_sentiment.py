@@ -45,6 +45,7 @@ class SentimentAnalyzer:
             self.finbert_analyzer = FinBERTAnalyzer()
         except Exception as e:
             logger.warning(f"Could not initialize FinBERT: {e}")
+            self.finbert_analyzer = None
     
     def analyze_sentiment_comprehensive(
         self, 
@@ -227,7 +228,7 @@ class SentimentAnalyzer:
             # Find events within the period
             period_events = events_df[
                 (events_df['date'] >= date) & 
-                (events_df['date'] < date + pd.Timedelta(days=1 if freq == 'D' else 7 if freq == 'W' else 30)
+                (events_df['date'] < date + pd.Timedelta(days=1 if freq == 'D' else 7 if freq == 'W' else 30))
             ]
             
             if len(period_events) > 0:

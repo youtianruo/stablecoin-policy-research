@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import load_config, ensure_directory
 from utils.io import save_data, load_data
-from data.fetch_coingecko import CoinGeckoFetcher
+from data.fetch_coingecko import fetch_series
 from data.fetch_fed import FedDataFetcher
 from data.fetch_macro import MacroDataFetcher
 from data.fetch_onchain import OnChainDataFetcher
@@ -44,7 +44,8 @@ def run_data_ingestion(config_path: str = "configs/config.yaml") -> Dict[str, pd
     ensure_directory(config['data']['processed_dir'])
     
     # Get date range
-    start_date = config.get('analysis', {}).get('start_date', '2020-01-01')
+    # Use a date range that works with CoinGecko free tier (365 days max)
+    start_date = config.get('analysis', {}).get('start_date', '2024-01-01')
     end_date = config.get('analysis', {}).get('end_date', datetime.now().strftime('%Y-%m-%d'))
     
     logger.info(f"Data ingestion period: {start_date} to {end_date}")
@@ -52,13 +53,29 @@ def run_data_ingestion(config_path: str = "configs/config.yaml") -> Dict[str, pd
     # Initialize data fetchers
     api_keys = config.get('api_keys', {})
     
-    coingecko_fetcher = CoinGeckoFetcher(api_keys.get('coingecko'))
-    fed_fetcher = FedDataFetcher()
-    macro_fetcher = MacroDataFetcher(api_keys.get('fred'))
-    onchain_fetcher = OnChainDataFetcher(
-        api_keys.get('etherscan'),
-        api_keys.get('dune')
-    )
+    # Note: Hardened CoinGecko fetcher doesn't need API key for basic usage
+    # Initialize fetchers (some may fail if API keys are missing)
+    fed_fetcher = None
+    macro_fetcher = None
+    onchain_fetcher = None
+    
+    try:
+        fed_fetcher = FedDataFetcher()
+    except Exception as e:
+        logger.warning(f"FedDataFetcher initialization failed: {e}")
+    
+    try:
+        macro_fetcher = MacroDataFetcher(api_keys.get('fred'))
+    except Exception as e:
+        logger.warning(f"MacroDataFetcher initialization failed: {e}")
+    
+    try:
+        onchain_fetcher = OnChainDataFetcher(
+            api_keys.get('etherscan'),
+            api_keys.get('dune')
+        )
+    except Exception as e:
+        logger.warning(f"OnChainDataFetcher initialization failed: {e}")
     
     # Ingest data
     ingested_data = {}
@@ -67,30 +84,54 @@ def run_data_ingestion(config_path: str = "configs/config.yaml") -> Dict[str, pd
         # 1. Stablecoin data
         logger.info("Fetching stablecoin data")
         stablecoin_data = fetch_stablecoin_data(
-            coingecko_fetcher, config, start_date, end_date
+            config, start_date, end_date
         )
         ingested_data.update(stablecoin_data)
         
-        # 2. Policy events
-        logger.info("Fetching policy events")
-        policy_events = fetch_policy_events(
-            fed_fetcher, start_date, end_date
-        )
-        ingested_data['policy_events'] = policy_events
+        # 2. Policy events (optional - requires FRED API key)
+        if fed_fetcher is not None:
+            try:
+                logger.info("Fetching policy events")
+                policy_events = fetch_policy_events(
+                    fed_fetcher, start_date, end_date
+                )
+                ingested_data['policy_events'] = policy_events
+            except Exception as e:
+                logger.warning(f"Skipping policy events: {e}")
+                ingested_data['policy_events'] = pd.DataFrame()
+        else:
+            logger.info("Skipping policy events (FedDataFetcher not available)")
+            ingested_data['policy_events'] = pd.DataFrame()
         
-        # 3. Macroeconomic data
-        logger.info("Fetching macroeconomic data")
-        macro_data = fetch_macro_data(
-            macro_fetcher, start_date, end_date
-        )
-        ingested_data.update(macro_data)
+        # 3. Macroeconomic data (optional - requires FRED API key)
+        if macro_fetcher is not None:
+            try:
+                logger.info("Fetching macroeconomic data")
+                macro_data = fetch_macro_data(
+                    macro_fetcher, start_date, end_date
+                )
+                ingested_data.update(macro_data)
+            except Exception as e:
+                logger.warning(f"Skipping macro data: {e}")
+                ingested_data['macro_data'] = pd.DataFrame()
+        else:
+            logger.info("Skipping macro data (MacroDataFetcher not available)")
+            ingested_data['macro_data'] = pd.DataFrame()
         
         # 4. On-chain data (optional)
-        logger.info("Fetching on-chain data")
-        onchain_data = fetch_onchain_data(
-            onchain_fetcher, config, start_date, end_date
-        )
-        ingested_data.update(onchain_data)
+        if onchain_fetcher is not None:
+            try:
+                logger.info("Fetching on-chain data")
+                onchain_data = fetch_onchain_data(
+                    onchain_fetcher, config, start_date, end_date
+                )
+                ingested_data.update(onchain_data)
+            except Exception as e:
+                logger.warning(f"Skipping on-chain data: {e}")
+                ingested_data['onchain_data'] = pd.DataFrame()
+        else:
+            logger.info("Skipping on-chain data (OnChainDataFetcher not available)")
+            ingested_data['onchain_data'] = pd.DataFrame()
         
         # Save all data
         logger.info("Saving ingested data")
@@ -106,7 +147,6 @@ def run_data_ingestion(config_path: str = "configs/config.yaml") -> Dict[str, pd
 
 
 def fetch_stablecoin_data(
-    fetcher: CoinGeckoFetcher,
     config: Dict,
     start_date: str,
     end_date: str
@@ -115,7 +155,6 @@ def fetch_stablecoin_data(
     Fetch stablecoin market data.
     
     Args:
-        fetcher: CoinGecko fetcher instance
         config: Configuration dictionary
         start_date: Start date for data
         end_date: End date for data
@@ -143,26 +182,59 @@ def fetch_stablecoin_data(
         return stablecoin_data
     
     try:
-        # Fetch prices
-        logger.info("Fetching stablecoin prices")
-        prices = fetcher.get_stablecoin_prices(coin_ids, start_date, end_date)
-        if not prices.empty:
-            stablecoin_data['stablecoin_prices'] = prices
+        # Fetch data using the new hardened fetcher
+        logger.info("Fetching stablecoin data using hardened fetcher")
         
-        # Fetch volumes
-        logger.info("Fetching stablecoin volumes")
-        volumes = fetcher.get_stablecoin_volumes(coin_ids, start_date, end_date)
-        if not volumes.empty:
-            stablecoin_data['stablecoin_volumes'] = volumes
+        # Calculate days from date range
+        from datetime import datetime
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        days = (end_dt - start_dt).days
         
-        # Fetch market caps
-        logger.info("Fetching stablecoin market caps")
-        market_caps = fetcher.get_stablecoin_market_caps(coin_ids, start_date, end_date)
-        if not market_caps.empty:
-            stablecoin_data['stablecoin_market_caps'] = market_caps
+        # Fetch data for each ticker
+        all_data = []
+        for ticker in tickers:
+            if ticker in coingecko_ids:
+                logger.info(f"Fetching data for {ticker}")
+                try:
+                    df = fetch_series(ticker, vs_currency="usd", days=days)
+                    all_data.append(df)
+                    logger.info(f"Successfully fetched {len(df)} data points for {ticker}")
+                except Exception as e:
+                    logger.error(f"Error fetching {ticker}: {e}")
+                    continue
+        
+        if all_data:
+            # Combine all data
+            combined_df = pd.concat(all_data, ignore_index=True)
+            
+            # Separate into prices and volumes
+            try:
+                prices_df = combined_df.pivot(index='timestamp', columns='symbol', values='price')
+                volumes_df = combined_df.pivot(index='timestamp', columns='symbol', values='volume')
+                
+                # Handle potential NaN values
+                prices_df = prices_df.dropna(how='all')  # Remove rows with all NaN
+                volumes_df = volumes_df.dropna(how='all')
+                
+                stablecoin_data['stablecoin_prices'] = prices_df
+                stablecoin_data['stablecoin_volumes'] = volumes_df
+                
+                logger.info(f"Successfully fetched data for {len(prices_df.columns)} stablecoins")
+                logger.info(f"Date range: {prices_df.index.min()} to {prices_df.index.max()}")
+                logger.info(f"Price data shape: {prices_df.shape}")
+                logger.info(f"Volume data shape: {volumes_df.shape}")
+                
+            except Exception as e:
+                logger.error(f"Error processing fetched data: {e}")
+                # Fallback: save raw combined data
+                stablecoin_data['stablecoin_raw_data'] = combined_df
+                logger.info(f"Saved raw data with shape: {combined_df.shape}")
         
     except Exception as e:
         logger.error(f"Error fetching stablecoin data: {e}")
+        import traceback
+        traceback.print_exc()
     
     return stablecoin_data
 

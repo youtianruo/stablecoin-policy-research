@@ -19,8 +19,13 @@ def load_config(config_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing configuration parameters
     """
-    # Load environment variables
-    load_dotenv()
+    # Load environment variables (optional)
+    try:
+        load_dotenv()
+    except Exception as e:
+        # If .env file has encoding issues, continue without it
+        print(f"Warning: Could not load .env file: {e}")
+        pass
     
     # Load YAML configuration
     with open(config_path, 'r') as file:

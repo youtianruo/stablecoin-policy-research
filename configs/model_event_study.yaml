@@ -1,5 +1,20 @@
 # Event study model configuration
 
+# Data configuration
+data:
+  raw_dir: "./data/raw"
+  interim_dir: "./data/interim"
+  processed_dir: "./data/processed"
+  cache_dir: "./data/cache"
+
+# Analysis configuration
+analysis:
+  type: event_study
+  input: data/interim/market_features.parquet
+  events: data/raw/events.csv
+  window: 3
+  results_dir: data/processed
+
 # Event study parameters
 event_study:
   # Event window configuration
@@ -100,6 +115,11 @@ robustness:
 
 # Output configuration
 output:
+  # Output directories
+  results_dir: "./data/processed"
+  figures_dir: "./notebooks/figures"
+  tables_dir: "./data/processed/tables"
+  
   # Tables to generate
   tables:
     - "summary_statistics"

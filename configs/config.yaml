@@ -113,8 +113,9 @@ analysis:
 
 # Output settings
 output:
-  figures_dir: "./figures"
-  results_dir: "./results"
+  figures_dir: "./data/processed/figures"
+  results_dir: "./data/processed"
+  tables_dir: "./data/processed/tables"
   format: "png"
   dpi: 300
 

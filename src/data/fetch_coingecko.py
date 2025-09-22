@@ -1,305 +1,284 @@
-"""
-CoinGecko API data fetcher for stablecoin prices and volumes.
-"""
-
+import os
+import time
+import math
+import json
+import logging
+from typing import Dict, Any, Optional
 import requests
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Union
-from datetime import datetime, timedelta
-import time
-import logging
+import yfinance as yf
 
-logger = logging.getLogger(__name__)
+BASE_COINGECKO = "https://api.coingecko.com/api/v3"
+BASE_COINCAP = "https://api.coincap.io/v2"
 
+# Symbol mappings for different providers
+COINGECKO_MAP = {
+    "USDT": "tether", 
+    "USDC": "usd-coin", 
+    "DAI": "dai", 
+    "BTC": "bitcoin",
+    "BUSD": "binance-usd",
+    "FRAX": "frax",
+    "LUSD": "liquity-usd",
+    "TUSD": "true-usd",
+    "USDP": "paxos-standard"
+}
 
-class CoinGeckoFetcher:
+YAHOO_MAP = {
+    "USDT": "USDT-USD",
+    "USDC": "USDC-USD", 
+    "DAI": "DAI-USD",
+    "BTC": "BTC-USD",
+    "BUSD": "BUSD-USD",
+    "FRAX": "FRAX-USD",
+    "LUSD": "LUSD-USD",
+    "TUSD": "TUSD-USD",
+    "USDP": "USDP-USD"
+}
+
+COINCAP_MAP = {
+    "USDT": "tether",
+    "USDC": "usd-coin",
+    "DAI": "dai",
+    "BTC": "bitcoin",
+    "BUSD": "binance-usd",
+    "FRAX": "frax",
+    "LUSD": "liquity-usd",
+    "TUSD": "true-usd",
+    "USDP": "paxos-standard"
+}
+
+HEADERS = {
+    "User-Agent": "stablecoin-policy-research/0.1 (+https://example.org)",
+    "Accept": "application/json",
+}
+
+TIMEOUT = 30  # seconds
+MAX_RETRIES = 3
+BACKOFF_BASE = 1.8  # exponential backoff
+
+class FetchError(RuntimeError):
+    pass
+
+def _request_coingecko(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Make request to CoinGecko API with retry logic."""
+    last_err = None
+    for i in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code in (429, 500, 502, 503, 504):
+                wait = BACKOFF_BASE ** i + (0.2 * i)
+                logging.warning("CoinGecko HTTP %s. Backing off %.1fs", r.status_code, wait)
+                time.sleep(wait)
+                continue
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text[:200]
+            raise FetchError(f"CoinGecko HTTP {r.status_code} :: {detail}")
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_err = e
+            wait = BACKOFF_BASE ** i + (0.2 * i)
+            logging.warning("CoinGecko network error: %s. Backing off %.1fs", e, wait)
+            time.sleep(wait)
+    raise FetchError(f"CoinGecko failed after {MAX_RETRIES} retries: {last_err}")
+
+def _request_coincap(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Make request to CoinCap API with retry logic."""
+    last_err = None
+    for i in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code in (429, 500, 502, 503, 504):
+                wait = BACKOFF_BASE ** i + (0.2 * i)
+                logging.warning("CoinCap HTTP %s. Backing off %.1fs", r.status_code, wait)
+                time.sleep(wait)
+                continue
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text[:200]
+            raise FetchError(f"CoinCap HTTP {r.status_code} :: {detail}")
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_err = e
+            wait = BACKOFF_BASE ** i + (0.2 * i)
+            logging.warning("CoinCap network error: %s. Backing off %.1fs", e, wait)
+            time.sleep(wait)
+    raise FetchError(f"CoinCap failed after {MAX_RETRIES} retries: {last_err}")
+
+def fetch_coingecko(symbol: str, vs_currency: str = "usd", days: int = 3650) -> pd.DataFrame:
+    """Fetch data from CoinGecko."""
+    if symbol not in COINGECKO_MAP:
+        raise ValueError(f"Unknown symbol {symbol} for CoinGecko. Known: {list(COINGECKO_MAP)}")
+    
+    if days > 3650:
+        logging.warning(f"Days parameter {days} exceeds CoinGecko limit (3650). Using 3650.")
+        days = 3650
+    
+    coin_id = COINGECKO_MAP[symbol]
+    url = f"{BASE_COINGECKO}/coins/{coin_id}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days, "precision": "full"}
+    
+    data = _request_coingecko(url, params)
+    
+    if "prices" not in data or "total_volumes" not in data:
+        raise FetchError(f"CoinGecko unexpected response for {symbol}: {json.dumps(data)[:300]}")
+    
+    prices = pd.DataFrame(data["prices"], columns=["ts", "price"])
+    vols = pd.DataFrame(data["total_volumes"], columns=["ts", "volume"])
+    out = prices.merge(vols, on="ts", how="left")
+    out["timestamp"] = pd.to_datetime(out["ts"], unit="ms", utc=True)
+    out["symbol"] = symbol
+    out["provider"] = "coingecko"
+    return out[["timestamp", "symbol", "price", "volume", "provider"]]
+
+def fetch_yahoo(symbol: str, vs_currency: str = "usd", days: int = 3650) -> pd.DataFrame:
+    """Fetch data from Yahoo Finance."""
+    if symbol not in YAHOO_MAP:
+        raise ValueError(f"Unknown symbol {symbol} for Yahoo Finance. Known: {list(YAHOO_MAP)}")
+    
+    ticker_symbol = YAHOO_MAP[symbol]
+    
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        
+        # Use period instead of date range for better reliability
+        if days <= 7:
+            period = "7d"
+        elif days <= 30:
+            period = "1mo"
+        elif days <= 90:
+            period = "3mo"
+        elif days <= 365:
+            period = "1y"
+        elif days <= 730:
+            period = "2y"
+        else:
+            period = "5y"
+        
+        # Fetch data
+        hist = ticker.history(period=period, interval="1d")
+        
+        if hist.empty:
+            raise FetchError(f"Yahoo Finance returned empty data for {symbol}")
+        
+        # Convert to our format - use reset_index to preserve the data
+        df = hist.reset_index()
+        df = df.rename(columns={'Date': 'timestamp', 'Close': 'price', 'Volume': 'volume'})
+        df["symbol"] = symbol
+        df["provider"] = "yahoo"
+        
+        # Remove rows with NaN prices
+        df = df.dropna(subset=['price'])
+        
+        if df.empty:
+            raise FetchError(f"Yahoo Finance returned no valid price data for {symbol}")
+        
+        return df[["timestamp", "symbol", "price", "volume", "provider"]]
+        
+    except Exception as e:
+        raise FetchError(f"Yahoo Finance error for {symbol}: {e}")
+
+def fetch_coincap(symbol: str, vs_currency: str = "usd", days: int = 3650) -> pd.DataFrame:
+    """Fetch data from CoinCap."""
+    if symbol not in COINCAP_MAP:
+        raise ValueError(f"Unknown symbol {symbol} for CoinCap. Known: {list(COINCAP_MAP)}")
+    
+    coin_id = COINCAP_MAP[symbol]
+    
+    # Calculate timestamps
+    end_time = int(time.time() * 1000)
+    start_time = end_time - (days * 24 * 60 * 60 * 1000)
+    
+    url = f"{BASE_COINCAP}/assets/{coin_id}/history"
+    params = {
+        "interval": "d1",
+        "start": start_time,
+        "end": end_time
+    }
+    
+    data = _request_coincap(url, params)
+    
+    if "data" not in data:
+        raise FetchError(f"CoinCap unexpected response for {symbol}: {json.dumps(data)[:300]}")
+    
+    if not data["data"]:
+        raise FetchError(f"CoinCap returned empty data for {symbol}")
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(data["data"])
+    df["timestamp"] = pd.to_datetime(df["time"], unit="ms", utc=True)
+    df["symbol"] = symbol
+    df["price"] = pd.to_numeric(df["priceUsd"])
+    df["volume"] = pd.to_numeric(df["volumeUsd"])
+    df["provider"] = "coincap"
+    
+    return df[["timestamp", "symbol", "price", "volume", "provider"]]
+
+def fetch_series(symbol: str, vs_currency: str = "usd", days: int = 3650) -> pd.DataFrame:
     """
-    Fetches stablecoin data from CoinGecko API.
+    Fetch data from multiple providers with fallback.
+    Tries: Yahoo Finance → CoinCap (CoinGecko skipped due to rate limits)
     """
+    providers = [
+        ("Yahoo Finance", fetch_yahoo),
+        ("CoinCap", fetch_coincap)
+    ]
     
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize CoinGecko fetcher.
-        
-        Args:
-            api_key: CoinGecko API key for higher rate limits
-        """
-        self.api_key = api_key
-        self.base_url = "https://api.coingecko.com/api/v3"
-        self.session = requests.Session()
-        
-        if api_key:
-            self.session.headers.update({'x-cg-demo-api-key': api_key})
+    last_error = None
     
-    def get_stablecoin_prices(
-        self, 
-        coin_ids: List[str], 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.DataFrame:
-        """
-        Fetch historical prices for stablecoins.
-        
-        Args:
-            coin_ids: List of CoinGecko coin IDs
-            start_date: Start date for data
-            end_date: End date for data
-            vs_currency: Currency to get prices in
+    for provider_name, fetch_func in providers:
+        try:
+            logging.info(f"Trying {provider_name} for {symbol}...")
+            df = fetch_func(symbol, vs_currency, days)
             
-        Returns:
-            DataFrame with prices for each stablecoin
-        """
-        prices_data = {}
-        
-        for coin_id in coin_ids:
-            try:
-                logger.info(f"Fetching prices for {coin_id}")
-                prices = self._get_coin_prices(coin_id, start_date, end_date, vs_currency)
-                prices_data[coin_id] = prices
-                time.sleep(0.1)  # Rate limiting
+            if not df.empty:
+                logging.info(f"✅ Successfully fetched {len(df)} data points for {symbol} from {provider_name}")
+                return df
+            else:
+                logging.warning(f"⚠️ {provider_name} returned empty data for {symbol}")
                 
-            except Exception as e:
-                logger.error(f"Error fetching prices for {coin_id}: {e}")
-                continue
-        
-        # Combine into DataFrame
-        if prices_data:
-            df = pd.DataFrame(prices_data)
-            df.index = pd.to_datetime(df.index)
-            return df
-        else:
-            return pd.DataFrame()
+        except Exception as e:
+            last_error = e
+            logging.warning(f"❌ {provider_name} failed for {symbol}: {e}")
+            continue
     
-    def _get_coin_prices(
-        self, 
-        coin_id: str, 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.Series:
-        """
-        Get historical prices for a single coin.
-        """
-        # Convert dates to timestamps
-        if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
-        if isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
-        
-        start_timestamp = int(start_date.timestamp())
-        end_timestamp = int(end_date.timestamp())
-        
-        url = f"{self.base_url}/coins/{coin_id}/market_chart/range"
-        params = {
-            'vs_currency': vs_currency,
-            'from': start_timestamp,
-            'to': end_timestamp
-        }
-        
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        prices = data['prices']
-        
-        # Convert to Series
-        timestamps = [pd.to_datetime(price[0], unit='ms') for price in prices]
-        values = [price[1] for price in prices]
-        
-        return pd.Series(values, index=timestamps, name=coin_id)
+    # If all providers failed
+    raise FetchError(f"All providers failed for {symbol}. Last error: {last_error}")
+
+def get_market_chart(coin_id: str, vs_currency: str, days: int) -> Dict[str, Any]:
+    """Legacy function for backward compatibility."""
+    url = f"{BASE_COINGECKO}/coins/{coin_id}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days, "precision": "full"}
+    return _request_coingecko(url, params)
+
+def main():
+    """Allow quick manual run: python -m src.data.fetch_coingecko"""
+    symbols = os.environ.get("SYMS", "USDT,USDC,DAI,BTC").split(",")
+    days = int(os.environ.get("DAYS", "3650"))
+    vs = os.environ.get("VS", "usd")
+
+    frames = []
+    for s in symbols:
+        s = s.strip().upper()
+        logging.info("Fetching %s...", s)
+        df = fetch_series(s, vs_currency=vs, days=days)
+        frames.append(df)
+        time.sleep(1.2)  # be polite
+
+    df_all = pd.concat(frames, ignore_index=True)
+    # Print a tiny preview so our .bat capture shows something
+    print(df_all.head().to_string(index=False))
     
-    def get_stablecoin_volumes(
-        self, 
-        coin_ids: List[str], 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.DataFrame:
-        """
-        Fetch historical volumes for stablecoins.
-        
-        Args:
-            coin_ids: List of CoinGecko coin IDs
-            start_date: Start date for data
-            end_date: End date for data
-            vs_currency: Currency to get volumes in
-            
-        Returns:
-            DataFrame with volumes for each stablecoin
-        """
-        volumes_data = {}
-        
-        for coin_id in coin_ids:
-            try:
-                logger.info(f"Fetching volumes for {coin_id}")
-                volumes = self._get_coin_volumes(coin_id, start_date, end_date, vs_currency)
-                volumes_data[coin_id] = volumes
-                time.sleep(0.1)  # Rate limiting
-                
-            except Exception as e:
-                logger.error(f"Error fetching volumes for {coin_id}: {e}")
-                continue
-        
-        # Combine into DataFrame
-        if volumes_data:
-            df = pd.DataFrame(volumes_data)
-            df.index = pd.to_datetime(df.index)
-            return df
-        else:
-            return pd.DataFrame()
-    
-    def _get_coin_volumes(
-        self, 
-        coin_id: str, 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.Series:
-        """
-        Get historical volumes for a single coin.
-        """
-        # Convert dates to timestamps
-        if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
-        if isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
-        
-        start_timestamp = int(start_date.timestamp())
-        end_timestamp = int(end_date.timestamp())
-        
-        url = f"{self.base_url}/coins/{coin_id}/market_chart/range"
-        params = {
-            'vs_currency': vs_currency,
-            'from': start_timestamp,
-            'to': end_timestamp
-        }
-        
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        volumes = data['total_volumes']
-        
-        # Convert to Series
-        timestamps = [pd.to_datetime(volume[0], unit='ms') for volume in volumes]
-        values = [volume[1] for volume in volumes]
-        
-        return pd.Series(values, index=timestamps, name=coin_id)
-    
-    def get_stablecoin_market_caps(
-        self, 
-        coin_ids: List[str], 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.DataFrame:
-        """
-        Fetch historical market caps for stablecoins.
-        
-        Args:
-            coin_ids: List of CoinGecko coin IDs
-            start_date: Start date for data
-            end_date: End date for data
-            vs_currency: Currency to get market caps in
-            
-        Returns:
-            DataFrame with market caps for each stablecoin
-        """
-        market_caps_data = {}
-        
-        for coin_id in coin_ids:
-            try:
-                logger.info(f"Fetching market caps for {coin_id}")
-                market_caps = self._get_coin_market_caps(coin_id, start_date, end_date, vs_currency)
-                market_caps_data[coin_id] = market_caps
-                time.sleep(0.1)  # Rate limiting
-                
-            except Exception as e:
-                logger.error(f"Error fetching market caps for {coin_id}: {e}")
-                continue
-        
-        # Combine into DataFrame
-        if market_caps_data:
-            df = pd.DataFrame(market_caps_data)
-            df.index = pd.to_datetime(df.index)
-            return df
-        else:
-            return pd.DataFrame()
-    
-    def _get_coin_market_caps(
-        self, 
-        coin_id: str, 
-        start_date: Union[str, datetime],
-        end_date: Union[str, datetime],
-        vs_currency: str = "usd"
-    ) -> pd.Series:
-        """
-        Get historical market caps for a single coin.
-        """
-        # Convert dates to timestamps
-        if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
-        if isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
-        
-        start_timestamp = int(start_date.timestamp())
-        end_timestamp = int(end_date.timestamp())
-        
-        url = f"{self.base_url}/coins/{coin_id}/market_chart/range"
-        params = {
-            'vs_currency': vs_currency,
-            'from': start_timestamp,
-            'to': end_timestamp
-        }
-        
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        market_caps = data['market_caps']
-        
-        # Convert to Series
-        timestamps = [pd.to_datetime(market_cap[0], unit='ms') for market_cap in market_caps]
-        values = [market_cap[1] for market_cap in market_caps]
-        
-        return pd.Series(values, index=timestamps, name=coin_id)
-    
-    def get_current_stablecoin_data(self, coin_ids: List[str]) -> pd.DataFrame:
-        """
-        Get current market data for stablecoins.
-        
-        Args:
-            coin_ids: List of CoinGecko coin IDs
-            
-        Returns:
-            DataFrame with current market data
-        """
-        coin_ids_str = ','.join(coin_ids)
-        url = f"{self.base_url}/simple/price"
-        params = {
-            'ids': coin_ids_str,
-            'vs_currencies': 'usd',
-            'include_market_cap': 'true',
-            'include_24hr_vol': 'true',
-            'include_24hr_change': 'true'
-        }
-        
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        # Convert to DataFrame
-        df_data = []
-        for coin_id, coin_data in data.items():
-            df_data.append({
-                'coin_id': coin_id,
-                'price_usd': coin_data['usd'],
-                'market_cap_usd': coin_data.get('usd_market_cap'),
-                'volume_24h_usd': coin_data.get('usd_24h_vol'),
-                'change_24h': coin_data.get('usd_24h_change')
-            })
-        
-        return pd.DataFrame(df_data)
+    # Show provider summary
+    if "provider" in df_all.columns:
+        provider_counts = df_all["provider"].value_counts()
+        print(f"\nProvider usage: {dict(provider_counts)}")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    main()
