@@ -6,6 +6,7 @@ Test the API interface to identify any issues.
 import sys
 import os
 import logging
+import pandas as pd
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
@@ -43,9 +44,9 @@ def test_api_interface():
     # Test 2: Test our hardened fetcher
     print("\n2️⃣ Testing hardened fetcher...")
     try:
-        from data.fetch_coingecko import fetch_series, MAP
+        from data.fetch_coingecko import fetch_series, COINGECKO_MAP
         
-        print(f"   Available symbols: {list(MAP.keys())}")
+        print(f"   Available symbols: {list(COINGECKO_MAP.keys())}")
         
         # Test with USDT (should always work)
         print("   Testing USDT fetch...")
@@ -95,12 +96,12 @@ def test_api_interface():
         # Check if mappings exist in our fetcher
         fetcher_missing = []
         for ticker, coin_id in coingecko_ids.items():
-            if ticker not in MAP:
+            if ticker not in COINGECKO_MAP:
                 fetcher_missing.append(ticker)
         
         if fetcher_missing:
             print(f"❌ Missing in fetcher MAP: {fetcher_missing}")
-            print(f"   Current MAP: {MAP}")
+            print(f"   Current MAP: {COINGECKO_MAP}")
         else:
             print("✅ All configured tickers are in fetcher MAP")
             

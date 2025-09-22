@@ -19,7 +19,7 @@ def test_policy_sentiment():
     print("=" * 60)
     
     # Set API key
-    api_key = "sk-8990403e972a4624bb313314927bc4c2"
+    api_key = ""
     
     # Initialize LLM adapter
     llm_adapter = LLMAdapter(api_key=api_key, model="deepseek-chat")

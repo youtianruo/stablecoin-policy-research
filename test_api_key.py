@@ -6,11 +6,14 @@ Simple test to verify DeepSeek API key works.
 import os
 import requests
 import json
+from dotenv import load_dotenv
 
 def test_deepseek_api():
     """Test DeepSeek API with the provided key."""
     
-    api_key = "sk-8990403e972a4624bb313314927bc4c2"
+    # Load environment variables
+    load_dotenv()
+    api_key = os.getenv('DEEPSEEK_API_KEY', '')
     
     print("🧪 Testing DeepSeek API Key")
     print("=" * 40)
